@@ -23,7 +23,7 @@
   ],
   "activationEvents": [
     "onCommand:swiper.swiper",
-    "onCommand:swiper.swiper.swiper-word-at-cursor"
+    "onCommand:swiper.swiper-word-at-cursor"
   ],
   "main": "./extension.js",
   "contributes": {

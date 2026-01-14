@@ -53,9 +53,9 @@ const styles = [
 const PROMPT_STRING = "type 2 or more chars to search"
 
 let state = {
-	// last searched string 
+	// last searched string
 	lastValue: PROMPT_STRING,
-	// last selected item 
+	// last selected item
 	lastSelected: null
 }
 
@@ -102,35 +102,35 @@ function _searchLine(lineIndex, line, parsed) {
 				return null
 			}
 			const [pattern, flags] = splitRegex.slice(1)
-			// only find the first 
+			// only find the first
 			const regex = new RegExp(pattern, flags);
 			const m = regex.exec(line)
 			if (!m && !p.negate) {
-				// regular mode, and this line doesn't match 
+				// regular mode, and this line doesn't match
 				return null
 			} else if (m && p.negate) {
-				// intentionally skip for case when matches but should be ignored. 
+				// intentionally skip for case when matches but should be ignored.
 				return null
 			} else if (!m && p.negate) {
-				// negate, and doesn't match, should keep this line. 
+				// negate, and doesn't match, should keep this line.
 				continue
 			} else {
-				// normal mode, record the matched range. 
+				// normal mode, record the matched range.
 				matchedRange.ranges.push([m.index, m[0].length])
 			}
 		} else {
 			const m = p.caseSensitive ? line.indexOf(p.pattern) : line.toLowerCase().indexOf(p.pattern)
 			if (p.negate) {
 				if (m !== -1) {
-					// intentionally skip this line. 
+					// intentionally skip this line.
 					return null
 				}
 			} else {
 				if (m === -1) {
-					// normal mode, no match 
+					// normal mode, no match
 					return null
 				} else {
-					// normal mode, matches, record range. 
+					// normal mode, matches, record range.
 					matchedRange.ranges.push([m, p.pattern.length])
 				}
 			}
@@ -139,9 +139,9 @@ function _searchLine(lineIndex, line, parsed) {
 	return matchedRange
 }
 
-function _search(searchStr, pick) {
+function _search(searchStr, pick, startLine) {
 	if (searchStr.length < 2 || searchStr === PROMPT_STRING) {
-		// to avoid search on too short a string. 
+		// to avoid search on too short a string.
 		return
 	}
 	const parsed = _parseSearchString(searchStr)
@@ -153,19 +153,24 @@ function _search(searchStr, pick) {
 	const doc = vscode.window.activeTextEditor.document
 	pick.items = items.map(match => ({
 		label: `${_leftPad(match.line+1)}: ${searchStr} `,
-		// IMPORTANT: set description forces vscode quickpick to match the description 
+		// IMPORTANT: set description forces vscode quickpick to match the description
 		// instead of the line content itself.
-		// otherwise quickpick filters to nothing. 
+		// otherwise quickpick filters to nothing.
 		description: `${doc.lineAt(match.line).text}`,
 		...match
 	}))
 	if (state.lastValue === searchStr && state.lastSelected) {
-		// javascript uses reference equal, we need to find the exact object that matches the last selected 
+		// javascript uses reference equal, we need to find the exact object that matches the last selected
 		pick.activeItems = [pick.items.find(it =>
-			// same label, same line #. 
+			// same label, same line #.
 			(it.label === state.lastSelected.label) &&
 			(it.line === state.lastSelected.line)
 		)]
+	} else if (typeof startLine === "number" && pick.items.length) {
+		// Not resuming a previous selection (new query / new word). Start from the first
+		// match at/after the cursor line so it feels like "search from here".
+		const next = pick.items.find(it => it.line >= startLine) || pick.items[0]
+		pick.activeItems = [next]
 	}
 	_updateMatchColor(items)
 }
@@ -186,7 +191,7 @@ function _updateMatchColor(items) {
 		for (let i = 0; i < item.ranges.length; i++) {
 			const [start, length] = item.ranges[i]
 			if (length === 0) {
-				// no length, no need to set border. 
+				// no length, no need to set border.
 				continue
 			}
 			colors[i % styles.length].push(
@@ -204,7 +209,7 @@ function _updateMatchColor(items) {
 
 
 function _jumpTo(selected) {
-	// find the last range which corresponds to the last search term 
+	// find the last range which corresponds to the last search term
 	const lastIndex = _firstOrNull(selected.ranges.reverse())
 	const start = lastIndex ? lastIndex[0] : 0
 	const end = lastIndex ? lastIndex[0] + lastIndex[1] : 0
@@ -225,12 +230,31 @@ function _firstOrNull(items) {
 
 function swipeWordAtCursor() {
 	const editor = vscode.window.activeTextEditor
-	const currentSelection = vscode.window.activeTextEditor.selection
-	// either selection or cursor
-	const word = editor.document.getText(editor.selection) || editor.document.getText(editor.document.getWordRangeAtPosition(currentSelection.start))
-	state = {
-		lastValue: word, // set last value with current word or selection
-		lastSelected: null
+	if (!editor) {
+		return
+	}
+
+	const currentSelection = editor.selection
+	// Prefer explicit selection; otherwise use the word under cursor.
+	let word = editor.document.getText(currentSelection)
+	if (!word) {
+		const wordRange = editor.document.getWordRangeAtPosition(currentSelection.active)
+		word = wordRange ? editor.document.getText(wordRange) : ""
+	}
+
+	// If we're searching the same word as last time, keep `lastSelected` so
+	// `swipe()` can resume from the previous match.
+	if (word && state.lastValue === word) {
+		swipe()
+		return
+	}
+
+	// New word → start a new search, but still prefill the input.
+	if (word) {
+		state = {
+			lastValue: word,
+			lastSelected: null
+		}
 	}
 	swipe()
 }
@@ -244,7 +268,7 @@ function swipe() {
 	pick.value = state.lastValue
 
 	pick.onDidChangeValue((value) => {
-		_search(value, pick)
+		_search(value, pick, currentSelection.active.line)
 	})
 	pick.onDidAccept(() => {
 		const selected = _firstOrNull(pick.selectedItems)
